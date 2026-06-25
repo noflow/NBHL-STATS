@@ -1557,7 +1557,7 @@
 <body>
 
 <header>
-  <div class="logo"><img class="league-logo" src="images/NHL%20Logo.png" alt="">NBHL <span>HOCKEY</span></div>
+  <div class="logo"><img class="league-logo" src="images/NHL%20Logo.png" alt="">NBSHL <span>HOCKEY</span></div>
   <button class="mobile-menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" onclick="toggleMobileMenu(event)">&#9776;</button>
   <nav id="main-nav">
     <button class="active" onclick="showPage('home', this)">Home</button>
@@ -1756,7 +1756,7 @@ const ROSTER_BLOCK_BASES = [0, 9, 18, 27];
 const TEAM_SALARY_CAP = 73000000;
 const BANNED_QUIT_TAB = "Banned & Quit";
 const TEAM_NAME_PREFIXES = [
-  "NBHL"
+  "NBSHL"
 ];
 
 // ── SHEET FETCH ───────────────────────────────────────────────────────────────
@@ -1998,7 +1998,7 @@ function formatLeaderValue(value, kind = "number") {
 async function loadHomeSettings() {
   if (homeSettings) return homeSettings;
   const fallback = {
-    home_title: "NBHL",
+    home_title: "NBSHL",
     home_subtitle: "No Bullshit Hockey League stats, standings, schedules, and playoff tracking.",
     league_intro: "Welcome to the No Bullshit Hockey League hub. Follow the current season, league leaders, team standings, player stats, goalie stats, schedules, recent games, and playoff race in one place.",
     season_label: "Current Season",
