@@ -1747,56 +1747,9 @@ let playoffStatsEnabled = false;
 let websiteSeasons = [];
 let selectedWebsiteSeasonId = "current";
 
-const DIVISIONS = {
-  "East": [
-    "TOR",
-    "OTT"
-  ],
-  "West": [
-    "DAL",
-    "VGK"
-  ]
-};
+const DIVISIONS = {};
 
-const TEAMS = [
-  {
-    "abbr": "TOR",
-    "name": "Toronto Maple Leafs",
-    "logo": "Toronto Maple Leafs.png",
-    "keywords": [
-      "toronto",
-      "maple leafs",
-      "leafs"
-    ]
-  },
-  {
-    "abbr": "OTT",
-    "name": "Ottawa Senators",
-    "logo": "Ottawa Senators.png",
-    "keywords": [
-      "ottawa",
-      "senators"
-    ]
-  },
-  {
-    "abbr": "DAL",
-    "name": "Dallas Stars",
-    "logo": "Dallas Stars.png",
-    "keywords": [
-      "dallas",
-      "stars"
-    ]
-  },
-  {
-    "abbr": "VGK",
-    "name": "Vegas Golden Knights",
-    "logo": "Vegas Golden Knights.png",
-    "keywords": [
-      "golden knights",
-      "vegas"
-    ]
-  }
-];
+const TEAMS = [];
 
 const ROSTER_SHEET_TAB = "Season Roster";
 const ROSTER_BLOCK_BASES = [0, 9, 18, 27];
@@ -3925,39 +3878,11 @@ let goalieLogData  = { cols: [], rows: [] };
 let allGamesRaw    = [];
 
 // Full team name lookup from abbreviation (for display)
-const ABBR_TO_FULL = {
-  "TOR": "Toronto Maple Leafs",
-  "OTT": "Ottawa Senators",
-  "DAL": "Dallas Stars",
-  "VGK": "Vegas Golden Knights"
-};
+const ABBR_TO_FULL = {};
 
-const TEAM_LOGO_FILES = {
-  "TOR": "Toronto Maple Leafs.png",
-  "OTT": "Ottawa Senators.png",
-  "DAL": "Dallas Stars.png",
-  "VGK": "Vegas Golden Knights.png"
-};
+const TEAM_LOGO_FILES = {};
 
-const ABBR_TO_KEYWORDS = {
-  "TOR": [
-    "toronto",
-    "maple leafs",
-    "leafs"
-  ],
-  "OTT": [
-    "ottawa",
-    "senators"
-  ],
-  "DAL": [
-    "dallas",
-    "stars"
-  ],
-  "VGK": [
-    "golden knights",
-    "vegas"
-  ]
-};
+const ABBR_TO_KEYWORDS = {};
 
 // Map team name variants to abbreviation (for game log lookup)
 function nameToAbbr(name) {
