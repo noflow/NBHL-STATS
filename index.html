@@ -1557,7 +1557,7 @@
 <body>
 
 <header>
-  <div class="logo"><img class="league-logo" src="images/NHL%20Logo.png" alt="">NBSHL <span>HOCKEY</span></div>
+  <div class="logo"><img class="league-logo" src="images/NHL%20Logo.png" alt="">NBHL <span>HOCKEY</span></div>
   <button class="mobile-menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" onclick="toggleMobileMenu(event)">&#9776;</button>
   <nav id="main-nav">
     <button class="active" onclick="showPage('home', this)">Home</button>
@@ -1756,7 +1756,7 @@ const ROSTER_BLOCK_BASES = [0, 9, 18, 27];
 const TEAM_SALARY_CAP = 73000000;
 const BANNED_QUIT_TAB = "Banned & Quit";
 const TEAM_NAME_PREFIXES = [
-  "NBSHL"
+  "NBHL"
 ];
 
 // ── SHEET FETCH ───────────────────────────────────────────────────────────────
@@ -1998,7 +1998,7 @@ function formatLeaderValue(value, kind = "number") {
 async function loadHomeSettings() {
   if (homeSettings) return homeSettings;
   const fallback = {
-    home_title: "NBSHL",
+    home_title: "NBHL",
     home_subtitle: "No Bullshit Hockey League stats, standings, schedules, and playoff tracking.",
     league_intro: "Welcome to the No Bullshit Hockey League hub. Follow the current season, league leaders, team standings, player stats, goalie stats, schedules, recent games, and playoff race in one place.",
     season_label: "Current Season",
@@ -4002,7 +4002,7 @@ async function loadGames() {
     allGamesRaw = gl.rows.filter(r => {
       const mid = String(r[glMidIdx]||r[0]||"").trim();
       const stitched = String(r[glIdx["Stitched Match IDs"]]||"").trim().toUpperCase();
-      if ((!mid || mid === "Match ID") && stitched !== "FORFEIT") return false;
+      if ((!mid || mid === "Match ID") && stitched !== "FORFEIT" && !looksLikeManualForfeitRow(r, glIdx)) return false;
       // Skip mangled lagout rows — they won't match any skater log entry
       // We identify them by checking if this ID is a first-part of a lagout
       // but only if the full compound version exists in skater log
@@ -4048,9 +4048,7 @@ async function loadGames() {
       });
     });
     console.log("Forfeit rows kept:", allGamesRaw.filter(r => {
-      const mid = String(r[glMidIdx]||r[0]||"").trim().toUpperCase();
-      const stitched = String(r[glIdx["Stitched Match IDs"]]||"").trim().toUpperCase();
-      return isForfeitMatchId(mid) || stitched === "FORFEIT";
+      return isForfeitGameRow(r, glIdx);
     }).length);
     const sel = document.getElementById("game-team-filter");
     sel.innerHTML = `<option value="">All Teams</option>`;
@@ -4120,15 +4118,20 @@ function renderGames() {
     const timeOnly = fullDate.includes(" ") ? fullDate.split(" ")[1] : "";
     const t1    = displayTeamName(r[glIdx["Team 1"]]);
     const t2    = displayTeamName(r[glIdx["Team 2"]]);
-    const s1    = String(r[glIdx["Team 1 Score"]]||"0").trim();
-    const s2    = String(r[glIdx["Team 2 Score"]]||"0").trim();
+    let s1      = String(r[glIdx["Team 1 Score"]]||"").trim();
+    let s2      = String(r[glIdx["Team 2 Score"]]||"").trim();
     const r1    = String(r[glIdx["Team 1 Result"]]||"").trim();
     const r2    = String(r[glIdx["Team 2 Result"]]||"").trim();
     const ot    = String(r[glIdx["OT"]]||"").trim().toLowerCase() === "yes";
     const early = String(r[glIdx["Ended Early"]]||"").trim().toLowerCase() === "yes";
     const lagout= String(r[glIdx["Lagout"]]||"").trim().toLowerCase() === "yes";
-    const forfeit = isForfeitMatchId(matchId) ||
-      String(r[glIdx["Stitched Match IDs"]]||"").trim().toUpperCase() === "FORFEIT";
+    const forfeit = isForfeitGameRow(r, glIdx);
+    if (forfeit && (!s1 || !s2)) {
+      if (r1 === "Win" && r2 === "Loss") { s1 = s1 || "1"; s2 = s2 || "0"; }
+      else if (r2 === "Win" && r1 === "Loss") { s1 = s1 || "0"; s2 = s2 || "1"; }
+    }
+    s1 = s1 || "0";
+    s2 = s2 || "0";
     const t1wins = r1 === "Win";
     const t2wins = r2 === "Win";
 
@@ -4197,8 +4200,43 @@ function isForfeitMatchId(mid) {
     if (Number.isFinite(parsed)) numeric = Math.trunc(parsed).toString();
   }
   if (!/^\d{14}$/.test(numeric)) return false;
+  if (/^20\d{12}$/.test(numeric)) {
+    const year = Number(numeric.slice(0, 4));
+    const month = Number(numeric.slice(4, 6));
+    const day = Number(numeric.slice(6, 8));
+    const check = new Date(`${numeric.slice(0, 4)}-${numeric.slice(4, 6)}-${numeric.slice(6, 8)}T12:00:00`);
+    if (year >= 2020 && month >= 1 && month <= 12 && day >= 1 && day <= 31 && !Number.isNaN(check.getTime())) {
+      return true;
+    }
+  }
   const suffix = numeric.slice(8);
   return /^[1-9]{6}$/.test(suffix) && new Set(suffix.split("")).size === 1;
+}
+
+function gameCell(row, idx, col) {
+  const pos = idx[col];
+  return pos === undefined ? "" : String(row[pos] || "").trim();
+}
+
+function looksLikeManualForfeitRow(row, idx) {
+  const matchId = gameCell(row, idx, "Match ID");
+  const team1 = gameCell(row, idx, "Team 1");
+  const team2 = gameCell(row, idx, "Team 2");
+  const id1 = gameCell(row, idx, "Team 1 ID");
+  const id2 = gameCell(row, idx, "Team 2 ID");
+  const r1 = gameCell(row, idx, "Team 1 Result").toUpperCase();
+  const r2 = gameCell(row, idx, "Team 2 Result").toUpperCase();
+  const stitched = gameCell(row, idx, "Stitched Match IDs").toUpperCase();
+  const ended = gameCell(row, idx, "Ended Early").toUpperCase();
+  const hasDecision = (r1 === "WIN" && r2 === "LOSS") || (r2 === "WIN" && r1 === "LOSS");
+  return !matchId && team1 && team2 && !id1 && !id2 && hasDecision && (stitched.includes("FORFEIT") || ended === "YES" || ended === "FORFEIT");
+}
+
+function isForfeitGameRow(row, idx) {
+  const matchId = gameCell(row, idx, "Match ID");
+  const stitched = gameCell(row, idx, "Stitched Match IDs").toUpperCase();
+  const ended = gameCell(row, idx, "Ended Early").toUpperCase();
+  return isForfeitMatchId(matchId) || stitched.includes("FORFEIT") || ended === "FORFEIT" || looksLikeManualForfeitRow(row, idx);
 }
 
 function formatGameDateHeader(d) {
@@ -4214,15 +4252,20 @@ function gameCardHtml(r, gameIdx, glIdx, source) {
   const timeOnly = fullDate.includes(" ") ? fullDate.split(" ")[1] : "";
   const t1    = displayTeamName(r[glIdx["Team 1"]]);
   const t2    = displayTeamName(r[glIdx["Team 2"]]);
-  const s1    = String(r[glIdx["Team 1 Score"]]||"0").trim();
-  const s2    = String(r[glIdx["Team 2 Score"]]||"0").trim();
+  let s1      = String(r[glIdx["Team 1 Score"]]||"").trim();
+  let s2      = String(r[glIdx["Team 2 Score"]]||"").trim();
   const r1    = String(r[glIdx["Team 1 Result"]]||"").trim();
   const r2    = String(r[glIdx["Team 2 Result"]]||"").trim();
   const ot    = String(r[glIdx["OT"]]||"").trim().toLowerCase() === "yes";
   const early = String(r[glIdx["Ended Early"]]||"").trim().toLowerCase() === "yes";
   const lagout= String(r[glIdx["Lagout"]]||"").trim().toLowerCase() === "yes";
-  const forfeit = isForfeitMatchId(matchId) ||
-    String(r[glIdx["Stitched Match IDs"]]||"").trim().toUpperCase() === "FORFEIT";
+  const forfeit = isForfeitGameRow(r, glIdx);
+  if (forfeit && (!s1 || !s2)) {
+    if (r1 === "Win" && r2 === "Loss") { s1 = s1 || "1"; s2 = s2 || "0"; }
+    else if (r2 === "Win" && r1 === "Loss") { s1 = s1 || "0"; s2 = s2 || "1"; }
+  }
+  s1 = s1 || "0";
+  s2 = s2 || "0";
   const t1wins = r1 === "Win";
   const t2wins = r2 === "Win";
 
