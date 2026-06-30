@@ -1441,6 +1441,27 @@
     min-width: 1120px;
     align-items: center;
   }
+  .bracket-play-in {
+    margin-bottom: 26px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.28);
+    background: rgba(0,0,0,0.22);
+  }
+  .bracket-play-in-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--gold);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+  }
+  .bracket-play-in-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
   .bracket-side {
     display: flex;
     gap: 18px;
@@ -1751,7 +1772,8 @@ const DIVISIONS = {};
 
 const TEAMS = [];
 
-const ROSTER_SHEET_TAB = "Season Roster";
+const ROSTER_SHEET_TAB = "Roster";
+const LEGACY_ROSTER_SHEET_TABS = ["CWHL Season 2 Roster", "Season Roster"];
 const ROSTER_BLOCK_BASES = [0, 9, 18, 27];
 const TEAM_SALARY_CAP = 73000000;
 const BANNED_QUIT_TAB = "Banned & Quit";
@@ -2807,13 +2829,17 @@ async function ensureMasterDataLoaded() {
 
 async function ensureOfficialRosterLoaded() {
   if (officialRosterCache) return officialRosterCache;
-  try {
-    const data = await fetchScheduleTab(ROSTER_SHEET_TAB);
-    officialRosterCache = parseOfficialRosterSheet([data.cols, ...data.rows]);
-  } catch(e) {
-    console.warn(`Unable to load ${ROSTER_SHEET_TAB}`, e);
-    officialRosterCache = { teams: {}, available: false };
+  const tabs = [ROSTER_SHEET_TAB, ...LEGACY_ROSTER_SHEET_TABS.filter(t => t !== ROSTER_SHEET_TAB)];
+  for (const tabName of tabs) {
+    try {
+      const data = await fetchScheduleTab(tabName);
+      officialRosterCache = parseOfficialRosterSheet([data.cols, ...data.rows]);
+      return officialRosterCache;
+    } catch(e) {
+      console.warn(`Unable to load ${tabName}`, e);
+    }
   }
+  officialRosterCache = { teams: {}, available: false };
   return officialRosterCache;
 }
 
@@ -2865,7 +2891,124 @@ function isRosterDataName(value) {
   return !/^(PLAYER NAME|SKATERS|GOALIES|OWNER|GM|AGM|ROSTER SPOTS|AVAILABLE CAP|TOTAL SALARY|OPEN SPOTS|IR SPOTS|-+)$/i.test(text);
 }
 
+function isFlatRosterSheet(rows) {
+  const header = rows.find(row => row.some(cell => normalizeConfigKey(cell) === "player_name"));
+  if (!header) return false;
+  const keys = header.map(normalizeConfigKey);
+  return keys.includes("team") && keys.includes("player_name") && keys.includes("status");
+}
+
+function parseFlatOfficialRosterSheet(rows) {
+  const roster = { teams: {}, available: true };
+  const headerIndex = rows.findIndex(row => row.some(cell => normalizeConfigKey(cell) === "player_name"));
+  if (headerIndex === -1) return roster;
+  const headers = rows[headerIndex].map(normalizeConfigKey);
+  const idx = {
+    team: headers.indexOf("team"),
+    name: headers.indexOf("player_name"),
+    salary: headers.indexOf("salary"),
+    status: headers.indexOf("status"),
+    staffRole: headers.indexOf("staff_role"),
+  };
+  rows.slice(headerIndex + 1).forEach(row => {
+    const abbr = teamAbbrFromRosterName(row[idx.team]);
+    const name = String(row[idx.name] || "").trim();
+    if (!abbr || !name || !isRosterDataName(name)) return;
+    const status = normalizeConfigKey(row[idx.status] || "Roster");
+    const staffRole = String(row[idx.staffRole] || "").trim();
+    const entry = {
+      name,
+      salary: idx.salary >= 0 ? String(row[idx.salary] || "").trim() : "",
+      position: "",
+    };
+    const teamRoster = roster.teams[abbr] || {
+      management: { owner: "", gm: "", agm: "" },
+      players: [],
+      skaters: [],
+      goalies: [],
+      injuredReserve: [],
+      capRemaining: "",
+    };
+    if (/^owner$/i.test(staffRole)) teamRoster.management.owner = name;
+    if (/^gm$/i.test(staffRole)) teamRoster.management.gm = name;
+    if (/^agm$/i.test(staffRole)) teamRoster.management.agm = name;
+    if (status === "tc" || status === "training_camp") {
+      if (!teamRoster.injuredReserve.some(p => cleanPlayerName(p.name) === cleanPlayerName(name))) {
+        teamRoster.injuredReserve.push(entry);
+      }
+    } else {
+      if (!teamRoster.players.some(p => cleanPlayerName(p.name) === cleanPlayerName(name))) {
+        teamRoster.players.push(entry);
+      }
+    }
+    roster.teams[abbr] = teamRoster;
+  });
+  Object.values(roster.teams).forEach(teamRoster => {
+    teamRoster.capRemaining = calculatedCapRemaining({ skaters: teamRoster.players, goalies: [] }) || teamRoster.capRemaining;
+  });
+  return roster;
+}
+
+function isTeamBlockRosterSheet(rows) {
+  return normalizeConfigKey(rows[0]?.[0]) === "roster"
+    && rows.some(row => normalizeConfigKey(row[0]) === "roster_count")
+    && rows.some(row => normalizeConfigKey(row[0]) === "player_name");
+}
+
+function parseTeamBlockOfficialRosterSheet(rows) {
+  const roster = { teams: {}, available: true };
+  const maxCols = Math.max(...rows.map(row => row.length), 0);
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < maxCols; c++) {
+      const teamName = String(rows[r]?.[c] || "").trim();
+      const abbr = teamAbbrFromRosterName(teamName);
+      if (!abbr || normalizeConfigKey(rows[r + 1]?.[c]) !== "roster_count") continue;
+      const teamRoster = roster.teams[abbr] || {
+        management: { owner: "", gm: "", agm: "" },
+        players: [],
+        skaters: [],
+        goalies: [],
+        injuredReserve: [],
+        capRemaining: "",
+      };
+      teamRoster.capRemaining = String(rows[r + 1]?.[c + 5] || "").trim() || teamRoster.capRemaining;
+      let section = "";
+      for (let rr = r + 2; rr < Math.min(rows.length, r + 40); rr++) {
+        const first = String(rows[rr]?.[c] || "").trim();
+        const key = normalizeConfigKey(first);
+        if (teamAbbrFromRosterName(first) && normalizeConfigKey(rows[rr + 1]?.[c]) === "roster_count") break;
+        if (key === "roster") { section = "players"; continue; }
+        if (key === "tc") { section = "injuredReserve"; continue; }
+        if (!section || key === "player_name" || !isRosterDataName(first)) continue;
+        const entry = {
+          name: first,
+          salary: String(rows[rr]?.[c + 1] || "").trim(),
+          position: "",
+        };
+        const staffRole = String(rows[rr]?.[c + 2] || "").trim();
+        if (section === "players") {
+          if (/^owner$/i.test(staffRole)) teamRoster.management.owner = first;
+          if (/^gm$/i.test(staffRole)) teamRoster.management.gm = first;
+          if (/^agm$/i.test(staffRole)) teamRoster.management.agm = first;
+        }
+        const target = teamRoster[section];
+        if (!target.some(p => cleanPlayerName(p.name) === cleanPlayerName(first))) {
+          target.push(entry);
+        }
+      }
+      roster.teams[abbr] = teamRoster;
+    }
+  }
+  Object.values(roster.teams).forEach(teamRoster => {
+    teamRoster.capRemaining = calculatedCapRemaining({ skaters: teamRoster.players, goalies: [] }) || teamRoster.capRemaining;
+  });
+  return roster;
+}
+
 function parseOfficialRosterSheet(rows) {
+  if (isTeamBlockRosterSheet(rows)) return parseTeamBlockOfficialRosterSheet(rows);
+  if (isFlatRosterSheet(rows)) return parseFlatOfficialRosterSheet(rows);
+
   const roster = { teams: {}, available: true };
   const seen = new Set();
 
@@ -3186,7 +3329,7 @@ function rowForRosterEntry(entry, rowMap, headers, abbr, isGoalie) {
 function officialRosterNameSet(roster) {
   const names = new Set();
   if (!roster) return names;
-  ["skaters", "goalies", "injuredReserve"].forEach(section => {
+  ["players", "skaters", "goalies", "injuredReserve"].forEach(section => {
     (roster[section] || []).forEach(p => names.add(cleanPlayerName(p.name)));
   });
   Object.values(roster.management || {}).forEach(name => {
@@ -3383,9 +3526,22 @@ function renderTeamRosterDashboard(abbr, data) {
   let ecuGoalies = [];
 
   if (officialRoster) {
-    rosteredSkaters = (officialRoster.skaters || []).map(entry => rowForRosterEntry(entry, skByName, skHeaders, abbr, false));
-    rosteredGoalies = (officialRoster.goalies || []).map(entry => rowForRosterEntry(entry, glByName, glHeaders, abbr, true));
-    addManagementRowsToRoster(rosteredSkaters, rosteredGoalies, officialRoster, skByName, glByName, skHeaders, glHeaders, abbr);
+    const flatPlayers = officialRoster.players || [];
+    if (flatPlayers.length) {
+      flatPlayers.forEach(entry => {
+        const key = cleanPlayerName(entry.name);
+        if (skByName.has(key) || !glByName.has(key)) {
+          rosteredSkaters.push(rowForRosterEntry(entry, skByName, skHeaders, abbr, false));
+        }
+        if (glByName.has(key)) {
+          rosteredGoalies.push(rowForRosterEntry(entry, glByName, glHeaders, abbr, true));
+        }
+      });
+    } else {
+      rosteredSkaters = (officialRoster.skaters || []).map(entry => rowForRosterEntry(entry, skByName, skHeaders, abbr, false));
+      rosteredGoalies = (officialRoster.goalies || []).map(entry => rowForRosterEntry(entry, glByName, glHeaders, abbr, true));
+      addManagementRowsToRoster(rosteredSkaters, rosteredGoalies, officialRoster, skByName, glByName, skHeaders, glHeaders, abbr);
+    }
     rosteredSkaters = filterHiddenRows(rosteredSkaters, skHeaders);
     rosteredGoalies = filterHiddenRows(rosteredGoalies, glHeaders);
     ecuSkaters = buildCurrentRosterRows(sk.rows, skHeaders, abbr, false, currentTeams)
@@ -3836,6 +3992,18 @@ function bracketSideHtml(side, rows, settings) {
   </div>`;
 }
 
+function bracketPlayInHtml(rows, settings) {
+  if (!rows.length) return "";
+  const label = settings.play_in_round_label || rows.map(r => r.round).find(Boolean) || "Play-In";
+  const seriesIds = [...new Set(rows.map(r => r.series))];
+  return `<div class="bracket-play-in">
+    <div class="bracket-play-in-title">${label}</div>
+    <div class="bracket-play-in-grid">
+      ${seriesIds.map(series => bracketMatchupHtml(rows.filter(r => r.series === series), settings)).join("")}
+    </div>
+  </div>`;
+}
+
 function renderPlayoffBracket(data, settings) {
   const idx = getIndexMap(data.cols);
   const rows = data.rows.map(r => ({
@@ -3852,6 +4020,7 @@ function renderPlayoffBracket(data, settings) {
     gameIds: String(r[idx["Game IDs"]]||"").trim(),
   })).filter(r => r.side && r.round && r.series);
 
+  const playIn = rows.filter(r => r.side.toLowerCase() === "play-in" || r.round.toLowerCase() === "play-in");
   const east = rows.filter(r => r.side.toLowerCase() === "east");
   const west = rows.filter(r => r.side.toLowerCase() === "west");
   const finals = rows.filter(r => r.side.toLowerCase() === "finals");
@@ -3862,6 +4031,7 @@ function renderPlayoffBracket(data, settings) {
         <div class="bracket-title">${settings.bracket_title || "PLAYOFFS"}</div>
         <div class="bracket-subtitle">${settings.bracket_subtitle || ""}</div>
       </div>
+      ${bracketPlayInHtml(playIn, settings)}
       <div class="bracket-board">
         ${bracketSideHtml("east", east, settings)}
         <div class="bracket-finals">
@@ -4556,6 +4726,9 @@ const RATING_CFG = {
     fallbackHigh: 0.82,
   },
   volumeCredit: 0.22,
+  forwardPaceCredit: 0.22,
+  defenseVolumeCredit: 0.16,
+  forwardPaceWeights: { pts: 0.50, gpg: 0.25, apg: 0.25 },
   volumePtsWeight: 0.55,
   volumePctLow: 0.30,
   volumePctHigh: 0.92,
@@ -4761,13 +4934,17 @@ function skaterComposite(stats, defenseShare) {
     const discipline = 0.5 * q.passPct + 0.5 * q.giveaway;
     score *= RATING_CFG.gateFloor + (1 - RATING_CFG.gateFloor) * discipline;
   }
-  if (RATING_CFG.volumeCredit > 0) {
-    const groupKey = defenseShare >= 0.5 ? "D" : "F";
-    const v = volumeBenchmarks()[groupKey];
+  if (group === "F" && RATING_CFG.forwardPaceCredit > 0) {
+    const weights = RATING_CFG.forwardPaceWeights || { pts: 0.50, gpg: 0.25, apg: 0.25 };
+    const pace = (q.pts * weights.pts) + (q.gpg * weights.gpg) + (q.apg * weights.apg);
+    score = score * (1 - RATING_CFG.forwardPaceCredit) + pace * RATING_CFG.forwardPaceCredit;
+  }
+  if (group === "D" && RATING_CFG.defenseVolumeCredit > 0) {
+    const v = volumeBenchmarks().D;
     const span = (low, high, value) => clampRating((parseStatNumber(value) - low) / (high - low), 0, 1);
     const volume = RATING_CFG.volumePtsWeight * span(v.ptsLow, v.ptsHigh, stats["PTS"])
       + (1 - RATING_CFG.volumePtsWeight) * span(v.gLow, v.gHigh, stats["G"]);
-    score = score * (1 - RATING_CFG.volumeCredit) + volume * RATING_CFG.volumeCredit;
+    score = score * (1 - RATING_CFG.defenseVolumeCredit) + volume * RATING_CFG.defenseVolumeCredit;
   }
   return clampRating(score, 0, 1);
 }
